@@ -1,0 +1,549 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Payslip System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <!-- Login Page -->
+    <div id="loginPage" class="min-h-screen flex items-center justify-center">
+        <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
+            <h2 class="text-2xl font-bold text-center mb-6">Employee Payslip Login</h2>
+            <form id="loginForm" class="space-y-4">
+                <div>
+                    <label for="employeeId" class="block text-sm font-medium text-gray-700">Employee ID</label>
+                    <input type="text" id="employeeId" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                    <input type="password" id="password" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded-md hover:bg-blue-700">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Deletion Confirmation Modal -->
+    <div id="deleteModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden">
+        <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+            <h3 class="text-lg font-medium mb-4">Confirm Deletion</h3>
+            <p class="mb-4">Please enter admin credentials to confirm deletion of <span id="deleteEmployeeName"></span> (ID: <span id="deleteEmployeeId"></span>).</p>
+            <form id="deleteConfirmForm" class="space-y-4">
+                <div>
+                    <label for="deleteAdminId" class="block text-sm font-medium text-gray-700">Admin ID</label>
+                    <input type="text" id="deleteAdminId" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div>
+                    <label for="deleteAdminPassword" class="block text-sm font-medium text-gray-700">Admin Password</label>
+                    <input type="password" id="deleteAdminPassword" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button type="button" id="cancelDelete" class="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600">Cancel</button>
+                    <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">Confirm Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Content (Dashboard, Admin Portal, Employee List) -->
+    <div id="mainContent" class="hidden min-h-screen bg-gray-100">
+        <header class="bg-blue-600 text-white p-4">
+            <h1 class="text-2xl font-bold">Employee Payslip System</h1>
+            <nav class="mt-2">
+                <button id="showPayslip" class="bg-blue-500 hover:bg-blue-700 text-white px-4 py-2 rounded-md mr-2">Payslip</button>
+                <button id="showAdminPortal" class="bg-blue-500 hover:bg-blue-700 text-white px-4 py-2 rounded-md mr-2 hidden">Admin Portal</button>
+                <button id="showEmployeeList" class="bg-blue-500 hover:bg-blue-700 text-white px-4 py-2 rounded-md mr-2 hidden">Employee List</button>
+                <button id="logoutBtn" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md">Logout</button>
+            </nav>
+        </header>
+
+        <!-- Payslip Dashboard -->
+        <div id="dashboard" class="container mx-auto p-6">
+            <h2 class="text-xl font-semibold mb-4">Payslip for October 2025</h2>
+            <div id="payslipContent" class="bg-white p-6 rounded-lg shadow-lg">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <h3 class="text-lg font-medium">Employee Details</h3>
+                        <p><strong>Name:</strong> <span id="payslipName"></span></p>
+                        <p><strong>Employee ID:</strong> <span id="payslipId"></span></p>
+                        <p><strong>Department:</strong> <span id="payslipDepartment"></span></p>
+                        <p><strong>Position:</strong> <span id="payslipPosition"></span></p>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium">Earnings</h3>
+                        <p><strong>Basic Salary:</strong> ₱<span id="payslipBasicSalary"></span></p>
+                        <p><strong>Allowances:</strong> ₱<span id="payslipAllowances"></span></p>
+                        <p><strong>Bonus:</strong> ₱<span id="payslipBonus"></span></p>
+                        <p><strong>Total Earnings:</strong> ₱<span id="payslipTotalEarnings"></span></p>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium">Deductions</h3>
+                        <p><strong>Tax:</strong> ₱<span id="payslipTax"></span></p>
+                        <p><strong>Insurance:</strong> ₱<span id="payslipInsurance"></span></p>
+                        <p><strong>Total Deductions:</strong> ₱<span id="payslipTotalDeductions"></span></p>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium">Net Pay</h3>
+                        <p><strong>Net Salary:</strong> ₱<span id="payslipNetSalary"></span></p>
+                    </div>
+                </div>
+                <button id="downloadBtn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Download/Print Payslip</button>
+            </div>
+        </div>
+
+        <!-- Admin Portal -->
+        <div id="adminPortal" class="hidden container mx-auto p-6">
+            <h2 class="text-xl font-semibold mb-4">Admin Portal</h2>
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h3 class="text-lg font-medium mb-4">Add Employee</h3>
+                <form id="addEmployeeForm" class="space-y-4">
+                    <div>
+                        <label for="newEmployeeName" class="block text-sm font-medium text-gray-700">Full Name</label>
+                        <input type="text" id="newEmployeeName" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="newEmployeeId" class="block text-sm font-medium text-gray-700">Employee ID</label>
+                        <input type="text" id="newEmployeeId" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="newDepartment" class="block text-sm font-medium text-gray-700">Department</label>
+                        <input type="text" id="newDepartment" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="newPosition" class="block text-sm font-medium text-gray-700">Position</label>
+                        <input type="text" id="newPosition" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="newBasicSalary" class="block text-sm font-medium text-gray-700">Basic Salary (₱)</label>
+                        <input type="number" id="newBasicSalary" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded-md hover:bg-blue-700">Add Employee</button>
+                </form>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h3 class="text-lg font-medium mb-4">Salary Adjustment</h3>
+                <form id="salaryAdjustForm" class="space-y-4">
+                    <div>
+                        <label for="adjustEmployeeId" class="block text-sm font-medium text-gray-700">Employee ID</label>
+                        <input type="text" id="adjustEmployeeId" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="adjustAmount" class="block text-sm font-medium text-gray-700">Adjustment Amount (₱)</label>
+                        <input type="number" id="adjustAmount" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="adjustType" class="block text-sm font-medium text-gray-700">Adjustment Type</label>
+                        <select id="adjustType" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            <option value="increase">Increase</option>
+                            <option value="decrease">Decrease</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded-md hover:bg-blue-700">Apply Adjustment</button>
+                </form>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-lg">
+                <h3 class="text-lg font-medium mb-4">Deletion History</h3>
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-3">Deleted Employee Name</th>
+                            <th class="p-3">Employee ID</th>
+                            <th class="p-3">Admin ID</th>
+                            <th class="p-3">Deletion Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deletionHistoryTableBody">
+                        <!-- Deletion history will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Employee List Portal -->
+        <div id="employeeList" class="hidden container mx-auto p-6">
+            <h2 class="text-xl font-semibold mb-4">Employee List</h2>
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <h3 class="text-lg font-medium mb-4">Edit Employee</h3>
+                <form id="editEmployeeForm" class="space-y-4 hidden">
+                    <input type="hidden" id="editEmployeeIndex">
+                    <div>
+                        <label for="editEmployeeName" class="block text-sm font-medium text-gray-700">Full Name</label>
+                        <input type="text" id="editEmployeeName" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="editEmployeeId" class="block text-sm font-medium text-gray-700">Employee ID</label>
+                        <input type="text" id="editEmployeeId" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="editDepartment" class="block text-sm font-medium text-gray-700">Department</label>
+                        <input type="text" id="editDepartment" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="editPosition" class="block text-sm font-medium text-gray-700">Position</label>
+                        <input type="text" id="editPosition" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div>
+                        <label for="editBasicSalary" class="block text-sm font-medium text-gray-700">Basic Salary (₱)</label>
+                        <input type="number" id="editBasicSalary" class="mt-1 w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 text-white p-2 rounded-md hover:bg-green-700">Update Employee</button>
+                </form>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-lg">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-3">Name</th>
+                            <th class="p-3">Employee ID</th>
+                            <th class="p-3">Department</th>
+                            <th class="p-3">Position</th>
+                            <th class="p-3">Basic Salary (₱)</th>
+                            <th class="p-3">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="employeeTableBody">
+                        <!-- Employee data will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Current logged-in user info
+        let currentUser = null;
+
+        // Simple client-side login simulation
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const employeeId = document.getElementById('employeeId').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('http://localhost:3000/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: employeeId, password })
+                });
+                if (!response.ok) {
+                    throw new Error('Invalid credentials');
+                }
+                const user = await response.json();
+                currentUser = user;
+                document.getElementById('loginPage').classList.add('hidden');
+                document.getElementById('mainContent').classList.remove('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+                document.getElementById('adminPortal').classList.add('hidden');
+                document.getElementById('employeeList').classList.add('hidden');
+                document.getElementById('editEmployeeForm').classList.add('hidden');
+                if (user.isAdmin) {
+                    document.getElementById('showAdminPortal').classList.remove('hidden');
+                    document.getElementById('showEmployeeList').classList.remove('hidden');
+                    fetchDeletionHistory();
+                }
+                fetchPayslip(employeeId);
+                fetchEmployees();
+            } catch (error) {
+                console.error(error);
+                alert('Login failed: ' + error.message);
+            }
+        });
+
+        // Navigation between pages
+        document.getElementById('showPayslip').addEventListener('click', function() {
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('adminPortal').classList.add('hidden');
+            document.getElementById('employeeList').classList.add('hidden');
+            document.getElementById('editEmployeeForm').classList.add('hidden');
+            document.getElementById('deleteModal').classList.add('hidden');
+            fetchPayslip(currentUser.id);
+        });
+
+        document.getElementById('showAdminPortal').addEventListener('click', function() {
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('adminPortal').classList.remove('hidden');
+            document.getElementById('employeeList').classList.add('hidden');
+            document.getElementById('editEmployeeForm').classList.add('hidden');
+            document.getElementById('deleteModal').classList.add('hidden');
+            fetchDeletionHistory();
+        });
+
+        document.getElementById('showEmployeeList').addEventListener('click', function() {
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('adminPortal').classList.add('hidden');
+            document.getElementById('employeeList').classList.remove('hidden');
+            document.getElementById('editEmployeeForm').classList.add('hidden');
+            document.getElementById('deleteModal').classList.add('hidden');
+            fetchEmployees();
+        });
+
+        // Logout functionality
+        document.getElementById('logoutBtn').addEventListener('click', function() {
+            document.getElementById('mainContent').classList.add('hidden');
+            document.getElementById('loginPage').classList.remove('hidden');
+            document.getElementById('loginForm').reset();
+            document.getElementById('editEmployeeForm').classList.add('hidden');
+            document.getElementById('deleteModal').classList.add('hidden');
+            currentUser = null;
+        });
+
+        // Fetch payslip data from backend
+        async function fetchPayslip(employeeId) {
+            try {
+                const response = await fetch(`http://localhost:3000/api/payslip/${employeeId}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch payslip');
+                }
+                const payslip = await response.json();
+                document.getElementById('payslipName').textContent = payslip.name;
+                document.getElementById('payslipId').textContent = payslip.id;
+                document.getElementById('payslipDepartment').textContent = payslip.department;
+                document.getElementById('payslipPosition').textContent = payslip.position;
+                document.getElementById('payslipBasicSalary').textContent = payslip.basicSalary.toFixed(2);
+                document.getElementById('payslipAllowances').textContent = payslip.allowances.toFixed(2);
+                document.getElementById('payslipBonus').textContent = payslip.bonus.toFixed(2);
+                document.getElementById('payslipTotalEarnings').textContent = payslip.totalEarnings.toFixed(2);
+                document.getElementById('payslipTax').textContent = payslip.tax.toFixed(2);
+                document.getElementById('payslipInsurance').textContent = payslip.insurance.toFixed(2);
+                document.getElementById('payslipTotalDeductions').textContent = payslip.totalDeductions.toFixed(2);
+                document.getElementById('payslipNetSalary').textContent = payslip.netSalary.toFixed(2);
+            } catch (error) {
+                console.error(error);
+                alert('Error fetching payslip: ' + error.message);
+            }
+        }
+
+        // Download/Print payslip as PDF
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            const element = document.getElementById('payslipContent');
+            const opt = {
+                margin: 0.5,
+                filename: `Payslip_${currentUser.id}_October2025.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 },
+                jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+            };
+            html2pdf().set(opt).from(element).save();
+        });
+
+        // Fetch employees from backend
+        async function fetchEmployees() {
+            try {
+                const response = await fetch('http://localhost:3000/api/employees');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch employees');
+                }
+                const employees = await response.json();
+                renderEmployeeList(employees);
+            } catch (error) {
+                console.error(error);
+                alert('Error fetching employees: ' + error.message);
+            }
+        }
+
+        // Add employee
+        document.getElementById('addEmployeeForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const name = document.getElementById('newEmployeeName').value;
+            const id = document.getElementById('newEmployeeId').value;
+            const department = document.getElementById('newDepartment').value;
+            const position = document.getElementById('newPosition').value;
+            const basicSalary = parseFloat(document.getElementById('newBasicSalary').value);
+
+            try {
+                const response = await fetch('http://localhost:3000/api/employees', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, id, department, position, basicSalary })
+                });
+                if (!response.ok) {
+                    throw new Error('Failed to add employee');
+                }
+                alert(`Employee Added:\nName: ${name}\nID: ${id}\nDepartment: ${department}\nPosition: ${position}\nBasic Salary: ₱${basicSalary.toFixed(2)}`);
+                this.reset();
+                fetchEmployees();
+            } catch (error) {
+                console.error(error);
+                alert('Error adding employee: ' + error.message);
+            }
+        });
+
+        // Salary adjustment
+        document.getElementById('salaryAdjustForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const id = document.getElementById('adjustEmployeeId').value;
+            const amount = parseFloat(document.getElementById('adjustAmount').value);
+            const type = document.getElementById('adjustType').value;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/employees/${id}/salary`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount, type })
+                });
+                if (!response.ok) {
+                    throw new Error('Failed to adjust salary');
+                }
+                const employee = await response.json();
+                alert(`Salary Adjustment:\nEmployee ID: ${id}\nType: ${type}\nAmount: ₱${amount.toFixed(2)}\nNew Salary: ₱${employee.basicSalary.toFixed(2)}`);
+                this.reset();
+                fetchEmployees();
+            } catch (error) {
+                console.error(error);
+                alert('Error adjusting salary: ' + error.message);
+            }
+        });
+
+        // Edit employee
+        function editEmployee(index, employee) {
+            document.getElementById('editEmployeeIndex').value = index;
+            document.getElementById('editEmployeeName').value = employee.name;
+            document.getElementById('editEmployeeId').value = employee.id;
+            document.getElementById('editDepartment').value = employee.department;
+            document.getElementById('editPosition').value = employee.position;
+            document.getElementById('editBasicSalary').value = employee.basicSalary;
+            document.getElementById('editEmployeeForm').classList.remove('hidden');
+        }
+        window.editEmployee = editEmployee;
+
+        // Initiate employee deletion
+        function initiateDeleteEmployee(index, employee) {
+            document.getElementById('deleteEmployeeName').textContent = employee.name;
+            document.getElementById('deleteEmployeeId').textContent = employee.id;
+            document.getElementById('deleteAdminId').value = '';
+            document.getElementById('deleteAdminPassword').value = '';
+            document.getElementById('deleteModal').dataset.employeeId = employee.id;
+            document.getElementById('deleteModal').dataset.index = index;
+            document.getElementById('deleteModal').classList.remove('hidden');
+        }
+        window.initiateDeleteEmployee = initiateDeleteEmployee;
+
+        // Confirm deletion
+        document.getElementById('deleteConfirmForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const adminId = document.getElementById('deleteAdminId').value;
+            const adminPassword = document.getElementById('deleteAdminPassword').value;
+            const employeeId = document.getElementById('deleteModal').dataset.employeeId;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/employees/${employeeId}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminId, adminPassword })
+                });
+                if (!response.ok) {
+                    throw new Error('Failed to delete employee');
+                }
+                alert(`Employee ${employeeId} deleted successfully`);
+                document.getElementById('deleteModal').classList.add('hidden');
+                this.reset();
+                fetchEmployees();
+                fetchDeletionHistory();
+            } catch (error) {
+                console.error(error);
+                alert('Error deleting employee: ' + error.message);
+            }
+        });
+
+        // Cancel deletion
+        document.getElementById('cancelDelete').addEventListener('click', function() {
+            document.getElementById('deleteModal').classList.add('hidden');
+            document.getElementById('deleteConfirmForm').reset();
+        });
+
+        // Fetch deletion history
+        async function fetchDeletionHistory() {
+            try {
+                const response = await fetch('http://localhost:3000/api/deletion-history');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch deletion history');
+                }
+                const history = await response.json();
+                renderDeletionHistory(history);
+            } catch (error) {
+                console.error(error);
+                alert('Error fetching deletion history: ' + error.message);
+            }
+        }
+
+        // Render employee list
+        function renderEmployeeList(employees) {
+            const tableBody = document.getElementById('employeeTableBody');
+            tableBody.innerHTML = '';
+            employees.forEach((employee, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="p-3 border-b">${employee.name}</td>
+                    <td class="p-3 border-b">${employee.id}</td>
+                    <td class="p-3 border-b">${employee.department}</td>
+                    <td class="p-3 border-b">${employee.position}</td>
+                    <td class="p-3 border-b">₱${employee.basicSalary.toFixed(2)}</td>
+                    <td class="p-3 border-b">
+                        <button onclick="editEmployee(${index}, ${JSON.stringify(employee)})" class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded-md mr-2">Edit</button>
+                        <button onclick="initiateDeleteEmployee(${index}, ${JSON.stringify(employee)})" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded-md">Delete</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        // Render deletion history
+        function renderDeletionHistory(history) {
+            const tableBody = document.getElementById('deletionHistoryTableBody');
+            tableBody.innerHTML = '';
+            history.forEach(entry => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="p-3 border-b">${entry.employeeName}</td>
+                    <td class="p-3 border-b">${entry.employeeId}</td>
+                    <td class="p-3 border-b">${entry.adminId}</td>
+                    <td class="p-3 border-b">${new Date(entry.timestamp).toLocaleString()}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+    </script>
+</body>
+</html>
